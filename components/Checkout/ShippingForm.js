@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
 import { useFormContext } from "react-hook-form";
+import { useDebounce, useDebouncedCallback } from 'use-debounce';
 
 import { commerce } from "../../lib/commerce";
-
 import { useCheckoutState, useCheckoutDispatch } from "../../context/checkout";
 
 import AddressFields from "./AddressFields";
-import { FormCheckbox as FormRadio, FormError } from "../Form";
+import ShippingOptions from './ShippingOptions';
 
 function ShippingForm() {
   const { id } = useCheckoutState();
@@ -14,30 +14,73 @@ function ShippingForm() {
   const [countries, setCountries] = useState();
   const [subdivisions, setSubdivisions] = useState();
   const [shippingOptions, setShippingOptions] = useState([]);
+  const [addressIsValid, setAddressIsValid] = useState(false);
+  const [addressError, setAddressError] = useState('');
+  const [shippingOptionsAreLoading, setShippingOptionsAreLoading] = useState(false);
   const methods = useFormContext();
   const { watch, setValue } = methods;
 
   const watchCountry = watch("shipping.country");
   const watchSubdivision = watch("shipping.region");
+  const [watchAddress] = useDebounce(watch('shipping'), 600);
 
   useEffect(() => {
     fetchCountries(id);
   }, []);
 
+  // Reset the shipping region and fetch new sub-regions when the country changes
   useEffect(() => {
     setValue("shipping.region", "");
 
     if (watchCountry) {
       fetchSubdivisions(id, watchCountry);
-      fetchShippingOptions(id, watchCountry);
     }
   }, [watchCountry]);
 
+  // Update address validity flag
   useEffect(() => {
-    if (watchSubdivision) {
-      fetchShippingOptions(id, watchCountry, watchSubdivision);
+    if (!watchAddress) {
+      setAddressIsValid(false);
+      return;
     }
-  }, [watchSubdivision]);
+
+    const { region, firstname, lastname, street, town_city: city, postal_zip_code: zip, country } = watchAddress;
+
+    // Check address fields are provided
+    if (![region, street, city, zip, country].every((val) => val && val !== '')) {
+      setAddressIsValid(false);
+      return;
+    }
+
+    // Check one of the name fields is provided
+    const name = [firstname, lastname].filter(part => part !== '').join(' ');
+    if (name.length === 0) {
+      setAddressIsValid(false);
+      return;
+    }
+
+    setAddressIsValid(true);
+  }, [watchAddress]);
+
+  // Fetch shipping options when the address is made valid
+  useEffect(() => {
+    if (!addressIsValid) {
+      return;
+    }
+
+    const { region, firstname, lastname, street, town_city: city, postal_zip_code: zip, country } = watchAddress;
+    const name = [firstname, lastname].filter(part => part !== '').join(' ');
+
+    fetchShippingOptions(id, {
+      name,
+      street1: street,
+      city,
+      zip,
+      country,
+      state: region,
+    })
+  }, [addressIsValid]);
+
 
   const fetchCountries = async (checkoutId) => {
     try {
@@ -66,30 +109,37 @@ function ShippingForm() {
     }
   };
 
-  const fetchShippingOptions = async (checkoutId, country, region) => {
-    if (!checkoutId && !country) return;
+  const fetchShippingOptions = async (checkoutId, address) => {
+    if (!checkoutId) {
+      return;
+    }
 
     setValue("fulfillment.shipping_method", null);
+    setShippingOptionsAreLoading(true);
+    setShippingOptions([]);
 
     try {
-      const shippingOptions = await commerce.checkout.getShippingOptions(
-        checkoutId,
-        {
-          country,
-          ...(region && { region }),
+      const shippingOptions = await fetch(`/api/shipping?token=${checkoutId}&address=${JSON.stringify(address)}`)
+        .then(response => {
+          return response.json();
+        });
+
+      console.log(shippingOptions);
+
+      if (Array.isArray(shippingOptions)) {
+        setShippingOptions(shippingOptions);
+
+        if (shippingOptions.length === 1) {
+          const [shippingOption] = shippingOptions;
+
+          setValue("fulfillment.shipping_method", shippingOption.id);
+          selectShippingMethod(shippingOption.id);
         }
-      );
-
-      setShippingOptions(shippingOptions);
-
-      if (shippingOptions.length === 1) {
-        const [shippingOption] = shippingOptions;
-
-        setValue("fulfillment.shipping_method", shippingOption.id);
-        selectShippingMethod(shippingOption.id);
       }
     } catch (err) {
       // noop
+    } finally {
+      setShippingOptionsAreLoading(false);
     }
   };
 
@@ -124,31 +174,12 @@ function ShippingForm() {
           <legend className="text-black font-medium text-lg md:text-xl py-3 block">
             Shipping
           </legend>
-          <div>
-            {watchCountry ? (
-              <>
-                <div className="-space-y-1">
-                  {shippingOptions.map(({ id, description, price }) => (
-                    <FormRadio
-                      id={id}
-                      type="radio"
-                      name="fulfillment.shipping_method"
-                      value={id}
-                      label={`${description}: ${price.formatted_with_symbol}`}
-                      onChange={onShippingSelect}
-                      required="You must select a shipping option"
-                    />
-                  ))}
-                </div>
-
-                <FormError name="fulfillment.shipping_method" />
-              </>
-            ) : (
-              <p className="text-sm text-black">
-                Please enter your address to fetch shipping options
-              </p>
-            )}
-          </div>
+          <ShippingOptions
+            shippingOptions={shippingOptions}
+            error={addressError}
+            loading={shippingOptionsAreLoading}
+            onShippingSelect={onShippingSelect}
+          />
         </fieldset>
       </div>
     </div>

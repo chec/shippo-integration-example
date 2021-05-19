@@ -22,7 +22,9 @@
     "react": "17.0.1",
     "react-dom": "17.0.1",
     "react-hook-form": "6.11.5",
-    "react-toastify": "6.1.0"
+    "react-toastify": "6.1.0",
+    "shippo": "^1.6.0",
+    "use-debounce": "^6.0.1"
   },
   "devDependencies": {
     "@chec/seeder": "^1.1.0",

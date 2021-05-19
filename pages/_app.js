@@ -49,7 +49,7 @@ function MyApp({ Component, pageProps, router }) {
         <meta
           name="description"
           content="Fine tools for thoughtful cooks"
-        ></meta>
+        />
       </Head>
       <Elements
         stripe={stripePromise}
